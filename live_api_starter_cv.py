@@ -75,7 +75,7 @@ CONFIG={
 pya = pyaudio.PyAudio()
 
 class AudioLoop:
-    def __init__(self):
+    def __init__(self, webcam_enabled=True):
         self.audio_in_queue = asyncio.Queue()
         self.audio_out_queue = asyncio.Queue()
         self.video_out_queue = asyncio.Queue()
@@ -83,7 +83,8 @@ class AudioLoop:
         self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
-        logger.info("AudioLoop initialized")
+        self.webcam_enabled = webcam_enabled
+        logger.info(f"AudioLoop initialized (webcam {'enabled' if webcam_enabled else 'disabled'})")
 
     async def send_text(self):
         while True:
@@ -287,15 +288,20 @@ class AudioLoop:
 
                 send_text_task.add_done_callback(cleanup)
 
-                # Create all tasks
+                # Create base tasks
                 tasks = [
                     tg.create_task(self.listen_audio()),
                     tg.create_task(self.send_audio()),
-                    tg.create_task(self.get_frames()),
-                    tg.create_task(self.send_frames()),
                     tg.create_task(self.receive_audio()),
                     tg.create_task(self.play_audio())
                 ]
+
+                # Add webcam tasks only if enabled
+                if self.webcam_enabled:
+                    tasks.extend([
+                        tg.create_task(self.get_frames()),
+                        tg.create_task(self.send_frames())
+                    ])
 
                 def check_error(task):
                     if task.cancelled():
@@ -318,12 +324,8 @@ class AudioLoop:
 if __name__ == "__main__":
     logger = setup_logging()
     logger.info("Starting application...")
-    print ("Application started, type 'q' and press Enter to exit.")
-    try:
-        main = AudioLoop()
-        asyncio.run(main.run())
-    except KeyboardInterrupt:
-        logger.info("Application stopped by user")
-    except Exception as e:
-        logger.error(f"Application error: {str(e)}")
-        logger.error(traceback.format_exc())
+    print("Application started, type 'q' and press Enter to exit.")
+    
+    # Create AudioLoop with webcam disabled
+    loop = AudioLoop(webcam_enabled=False)
+    asyncio.run(loop.run())

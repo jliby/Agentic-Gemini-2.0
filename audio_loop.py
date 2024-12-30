@@ -25,6 +25,7 @@ This implementation of AudioLoop() is meant to be imported into other porgrams t
 import logging
 import os
 from datetime import datetime
+import time
 
 def setup_logging():
     """
@@ -217,6 +218,15 @@ class AudioLoop:
             img.thumbnail([1024, 1024])
             logger.debug(f"Captured screen resized from {original_size} to {img.size}")
 
+            # Save first screenshot if it hasn't been saved yet
+            if not hasattr(self, '_first_screenshot_saved'):
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                project_dir = os.path.dirname(os.path.abspath(__file__))
+                save_path = os.path.join(project_dir, f"screenshot_{timestamp}.jpg")
+                img.save(save_path)
+                logger.info(f"First screenshot saved to {save_path}")
+                self._first_screenshot_saved = True
+
             image_io = io.BytesIO()
             img.save(image_io, format="jpeg")
             image_io.seek(0)
@@ -233,6 +243,9 @@ class AudioLoop:
         until the task is cancelled.
         """
         logger.info("Starting screen capture...")
+        # Reset the first screenshot flag when starting new capture
+        if hasattr(self, '_first_screenshot_saved'):
+            delattr(self, '_first_screenshot_saved')
         try:
             frame_count = 0
             while True:

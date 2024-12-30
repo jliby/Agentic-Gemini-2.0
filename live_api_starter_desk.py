@@ -63,12 +63,16 @@ CHUNK_SIZE = 512
 
 MODEL = "models/gemini-2.0-flash-exp"
 
+system_instructions = "You are a genz freind name Kore, please speak in a genz way"
+
+logger = setup_logging()
 client = genai.Client(
     http_options={'api_version': 'v1alpha'},
     api_key=GEMINI_API_KEY
     )
 
 CONFIG={
+    "system_instruction": system_instructions,
     "generation_config": {"response_modalities": ["AUDIO"]}}
 
 pya = pyaudio.PyAudio()

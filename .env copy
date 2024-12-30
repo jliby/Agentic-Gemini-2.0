@@ -1,5 +1,0 @@
-# update this with your private key
-# you can get one from the Google AI Studio
-
-GEMINI_API_KEY =  'YOUR_PRIVATE_GEMINI_API_KEY'
-GOOGLE_API_KEY = 'YOUR_PRIVATE_GEMINI_API_KEY'
