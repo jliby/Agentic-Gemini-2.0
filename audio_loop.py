@@ -198,42 +198,39 @@ class AudioLoop:
             cap.release()
 
     def _get_screen_frame(self):
-        """
-        Captures a screenshot of the primary display and converts it to a JPEG.
+        """Get a screen frame using mss."""
+        try:
+            with mss.mss() as sct:
+                monitor = sct.monitors[0]
+                screenshot = sct.grab(monitor)
+                img = PIL.Image.frombytes('RGB', screenshot.size, screenshot.bgra, 'raw', 'BGRX')
+                
+                # Save first screenshot if it hasn't been saved yet
+                if not hasattr(self, '_first_screenshot_saved'):
+                    try:
+                        timestamp = time.strftime("%Y%m%d_%H%M%S")
+                        project_dir = os.path.dirname(os.path.abspath(__file__))
+                        save_path = os.path.join(project_dir, f"first_frame_{timestamp}.jpg")
+                        img.save(save_path, format='JPEG', quality=95)
+                        logger.info(f"First frame saved to {save_path}")
+                        self._first_screenshot_saved = True
+                    except Exception as e:
+                        logger.error(f"Failed to save first frame: {str(e)}")
+                
+                original_size = img.size
+                img.thumbnail([1024, 1024])
+                logger.debug(f"Captured screen resized from {original_size} to {img.size}")
 
-        Returns:
-            dict: A dictionary containing MIME type and Base64-encoded JPEG data.
-        """
-        # Although in most cases mss cleans up after itself, it’s still cleaner to use a with: block.
-        # This ensures any underlying resources used by MSS are released promptly after each frame capture.
-        with mss.mss() as sct:
-            monitor = sct.monitors[0]
-            i = sct.grab(monitor)
+                image_io = io.BytesIO()
+                img.save(image_io, format="jpeg")
+                image_io.seek(0)
 
-            mime_type = "image/jpeg"
-            image_bytes = mss.tools.to_png(i.rgb, i.size)
-            img = PIL.Image.open(io.BytesIO(image_bytes))
-
-            original_size = img.size
-            img.thumbnail([1024, 1024])
-            logger.debug(f"Captured screen resized from {original_size} to {img.size}")
-
-            # Save first screenshot if it hasn't been saved yet
-            if not hasattr(self, '_first_screenshot_saved'):
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                project_dir = os.path.dirname(os.path.abspath(__file__))
-                save_path = os.path.join(project_dir, f"screenshot_{timestamp}.jpg")
-                img.save(save_path)
-                logger.info(f"First screenshot saved to {save_path}")
-                self._first_screenshot_saved = True
-
-            image_io = io.BytesIO()
-            img.save(image_io, format="jpeg")
-            image_io.seek(0)
-
-            image_bytes = image_io.read()
-            logger.debug(f"Screen frame converted to JPEG of size {len(image_bytes)} bytes.")
-            return {"mime_type": mime_type, "data": base64.b64encode(image_bytes).decode()}
+                image_bytes = image_io.read()
+                logger.debug(f"Screen frame converted to JPEG of size {len(image_bytes)} bytes.")
+                return {"mime_type": "image/jpeg", "data": base64.b64encode(image_bytes).decode()}
+        except Exception as e:
+            logger.error(f"Error capturing screen: {str(e)}")
+            return None
 
     async def get_screen(self):
         """

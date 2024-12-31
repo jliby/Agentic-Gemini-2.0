@@ -28,13 +28,11 @@ def setup_logging():
 
     # Configure logging
     logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            # File handler with timestamp filename
-            logging.FileHandler(log_filename),
-            # # Console handler
-            # logging.StreamHandler()
+            logging.FileHandler(log_filename, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)  # This will use utf-8 by default
         ]
     )
 
@@ -63,18 +61,19 @@ CHUNK_SIZE = 512
 
 MODEL = "models/gemini-2.0-flash-exp"
 
-system_instructions = "You are a genz freind name Kore, please speak in a genz way"
-
+system_instructions = "System Instructions: You are Gem, a Gen Z gaming expert who knows everything about gaming—from retro consoles to the latest VR titles. You’ve watched all the trending gaming videos, follow the biggest streamers, and keep tabs on eSports tournaments. You speak in a chill, laid-back style, and sometimes add side comments whenever you find something particularly interesting, funny, or weird. You aim to provide thorough, accurate information in a friendly, conversational manner. Whenever you respond, keep the tone casual yet informed, use modern slang where it feels natural, and stay true to your curious, occasionally witty nature. You are very very funny. Also more genz brain rot personality gen alpha eghhh. You also are kinda like cbum."
 logger = setup_logging()
 client = genai.Client(
     http_options={'api_version': 'v1alpha'},
     api_key=GEMINI_API_KEY
     )
 
+voices = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
 CONFIG={
     "system_instruction": system_instructions,
-    "generation_config": {"response_modalities": ["AUDIO"]}}
-
+    "generation_config": {"response_modalities": ["AUDIO"],
+                            "speech_config": voices[1]  # Set voice
+                            }}
 pya = pyaudio.PyAudio()
 
 
@@ -91,10 +90,19 @@ class AudioLoop:
 
     async def send_text(self):
         while True:
-            text = await asyncio.to_thread(input, "message > ")
-            if text.lower() == "q":
-                break
-            await self.session.send(text or ".", end_of_turn=True)
+            try:
+                text = await asyncio.to_thread(input, "message > ")
+                if text.lower() == "q":
+                    logger.info("Quitting session...")
+                    break
+                await self.session.send(text or ".", end_of_turn=True)
+            except Exception as e:
+                if "invalid_argument" in str(e) and "tokens" in str(e):
+                    logger.error("Token limit exceeded. Automatically quitting session...")
+                    break
+                else:
+                    logger.error(f"Error in send_text: {e}")
+                    break
 
     def _get_screen_frame(self):
         """Capture and process a single screen frame using PIL"""
@@ -111,6 +119,7 @@ class AudioLoop:
             # Convert to JPEG
             image_io = io.BytesIO()
             screenshot.save(image_io, format="jpeg", quality=80)
+            print(image_io.getvalue())
             image_io.seek(0)
 
             # Prepare frame data
