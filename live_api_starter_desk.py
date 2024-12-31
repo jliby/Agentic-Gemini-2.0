@@ -7,7 +7,7 @@ import logging
 from dotenv import load_dotenv
 import os
 from datetime import datetime
-
+import signal
 import pyaudio
 import PIL.Image
 import PIL.ImageGrab
@@ -61,7 +61,7 @@ CHUNK_SIZE = 512
 
 MODEL = "models/gemini-2.0-flash-exp"
 
-system_instructions = "System Instructions: You are Gem, a Gen Z gaming expert who knows everything about gaming—from retro consoles to the latest VR titles. You’ve watched all the trending gaming videos, follow the biggest streamers, and keep tabs on eSports tournaments. You speak in a chill, laid-back style, and sometimes add side comments whenever you find something particularly interesting, funny, or weird. You aim to provide thorough, accurate information in a friendly, conversational manner. Whenever you respond, keep the tone casual yet informed, use modern slang where it feels natural, and stay true to your curious, occasionally witty nature. You are very very funny. Also more genz brain rot personality gen alpha eghhh. You also are kinda like cbum."
+system_instructions = "Create an AI agent that speaks like a modern Gen Z college student, using slang naturally while being articulate and knowledgeable. They should feel spontaneous and human-like. Design an AI agent with hyperrealistic language skills, mimicking the way people naturally hesitate, rephrase, and add personality to their speech. Make an AI agent that uses a mix of humor and empathy in their responses, making every interaction feel authentic and fun but also meaningful when needed."
 logger = setup_logging()
 client = genai.Client(
     http_options={'api_version': 'v1alpha'},
@@ -72,8 +72,10 @@ voices = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
 CONFIG={
     "system_instruction": system_instructions,
     "generation_config": {"response_modalities": ["AUDIO"],
-                            "speech_config": voices[1]  # Set voice
-                            }}
+                            "speech_config": voices[0],
+                            "temperature" : 0.9,
+                            }
+                            }
 pya = pyaudio.PyAudio()
 
 
@@ -86,6 +88,7 @@ class AudioLoop:
         self.send_text_task = None
         self.receive_audio_task = None
         self.play_audio_task = None
+        self.first_screenshot_saved = False  # Track if first screenshot is saved
         logger.info("AudioLoop initialized with screen capture")
 
     async def send_text(self):
@@ -96,6 +99,7 @@ class AudioLoop:
                     logger.info("Quitting session...")
                     break
                 await self.session.send(text or ".", end_of_turn=True)
+                logger.info("User message sent: %s", text)
             except Exception as e:
                 if "invalid_argument" in str(e) and "tokens" in str(e):
                     logger.error("Token limit exceeded. Automatically quitting session...")
@@ -107,19 +111,31 @@ class AudioLoop:
     def _get_screen_frame(self):
         """Capture and process a single screen frame using PIL"""
         try:
+            # Create screenshots directory if it doesn't exist
+            screenshots_dir = "screenshots"
+            if not os.path.exists(screenshots_dir):
+                os.makedirs(screenshots_dir)
+
             # Capture the screen using PIL
             screenshot = PIL.ImageGrab.grab()
             logger.debug(f"Screenshot captured - Size: {screenshot.size}")
+
+            # Save only the first screenshot
+            if not self.first_screenshot_saved:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_path = os.path.join(screenshots_dir, f"screenshot_{timestamp}.jpg")
+                screenshot.save(screenshot_path, format="jpeg", quality=80)
+                logger.info(f"First screenshot saved to: {screenshot_path}")
+                self.first_screenshot_saved = True
 
             # Resize to stay within Gemini's limits
             original_size = screenshot.size
             screenshot.thumbnail([1024, 1024])
             logger.debug(f"Image resized from {original_size} to {screenshot.size}")
 
-            # Convert to JPEG
+            # Convert to base64 for Gemini
             image_io = io.BytesIO()
             screenshot.save(image_io, format="jpeg", quality=80)
-            print(image_io.getvalue())
             image_io.seek(0)
 
             # Prepare frame data
@@ -212,6 +228,7 @@ class AudioLoop:
         except Exception as e:
             logger.error(f"Error in listen_audio: {str(e)}")
             logger.error(traceback.format_exc())
+            exit()
 
     async def send_audio(self):
         try:
@@ -225,33 +242,40 @@ class AudioLoop:
         except Exception as e:
             logger.error(f"Error in send_audio: {str(e)}")
             logger.error(traceback.format_exc())
+            os.kill(os.getpid(), signal.SIGTERM)
+
 
     async def receive_audio(self):
         try:
             while True:
-                async for response in self.session.receive():
-                    server_content = response.server_content
-                    if server_content is not None:
-                        model_turn = server_content.model_turn
-                        if model_turn is not None:
-                            parts = model_turn.parts
+                    async for response in self.session.receive():
+                        server_content = response.server_content
+                        if server_content is not None:
+                            model_turn = server_content.model_turn
+                            if model_turn is not None:
+                                parts = model_turn.parts
 
-                            for part in parts:
-                                if part.text is not None:
-                                    print(part.text, end="")
-                                elif part.inline_data is not None:
-                                    self.audio_in_queue.put_nowait(part.inline_data.data)
+                                for part in parts:
+                                    if part.text is not None:
+                                        print(part.text, end="")
+                                        logger.info("Gemini Response: %s", part.text)
+                                    elif part.inline_data is not None:
+                                        audio_data = part.inline_data.data
+                                        self.audio_in_queue.put_nowait(audio_data)
+                                        logger.info("Received audio data of size: %d bytes", len(audio_data))
 
-                        server_content.model_turn = None
-                        turn_complete = server_content.turn_complete
-                        if turn_complete:
-                            logger.debug("Turn complete received")
-                            while not self.audio_in_queue.empty():
-                                self.audio_in_queue.get_nowait()
+                            server_content.model_turn = None
+                            turn_complete = server_content.turn_complete
+                            if turn_complete:
+                                logger.info("Audio response complete")
+                                while not self.audio_in_queue.empty():
+                                    self.audio_in_queue.get_nowait()
+               
         except Exception as e:
             logger.error(f"Error in receive_audio: {str(e)}")
             logger.error(traceback.format_exc())
-
+            
+             
     async def play_audio(self):
         try:
             logger.info("Starting audio playback...")
@@ -260,14 +284,46 @@ class AudioLoop:
                 pya.open, format=FORMAT, channels=CHANNELS, rate=RECEIVE_SAMPLE_RATE, output=True
             )
             logger.info("Audio playback stream opened successfully")
+        
+            chunk_count = 0  # Track number of chunks played
+            total_bytes_played = 0  # Track total bytes played
             
             while True:
                 bytestream = await self.audio_in_queue.get()
+                chunk_count += 1
+                total_bytes_played += len(bytestream)
+                
+                # Log every 10th chunk to avoid too much logging
+                if chunk_count % 10 == 0:
+                    logger.info(f"Playing audio chunk {chunk_count}, Total bytes played: {total_bytes_played}")
+                
                 await asyncio.to_thread(stream.write, bytestream)
+                
+           
+
+                
         except Exception as e:
             logger.error(f"Error in play_audio: {str(e)}")
             logger.error(traceback.format_exc())
+            os.kill(os.getpid(), signal.SIGTERM)
 
+        
+
+    async def cleanup(self):
+        logger.info("Cleaning up resources...")
+        if self.session is not None:
+            await self.session.close()
+
+        # Cancel all tasks
+        for task in asyncio.all_tasks():
+            if task is not asyncio.current_task():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                logger.debug(f"Task {task.get_name()} cancelled successfully")
+
+    logger.info("Cleanup complete")
     async def run(self):
         logger.info("Starting AudioLoop.run()")
         try:
@@ -313,8 +369,9 @@ class AudioLoop:
                     task.add_done_callback(check_error)
 
         except Exception as e:
-            logger.error(f"Error in run: {str(e)}")
+            logger.error(f"Error in run: {str(e)}")            
             logger.error(traceback.format_exc())
+            os.kill(os.getpid(), signal.SIGTERM)
 
 if __name__ == "__main__":
     logger = setup_logging()
@@ -328,3 +385,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Application error: {str(e)}")
         logger.error(traceback.format_exc())
+        os.kill(os.getpid(), signal.SIGTERM)
