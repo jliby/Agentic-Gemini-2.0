@@ -81,9 +81,6 @@ pya = pyaudio.PyAudio()
 
 class AudioLoop:
     def __init__(self):
-        self.audio_in_queue = asyncio.Queue()
-        self.audio_out_queue = asyncio.Queue()
-        self.video_out_queue = asyncio.Queue()
         self.session = None
         self.send_text_task = None
         self.receive_audio_task = None
@@ -119,6 +116,10 @@ class AudioLoop:
             # Capture the screen using PIL
             screenshot = PIL.ImageGrab.grab()
             logger.debug(f"Screenshot captured - Size: {screenshot.size}")
+
+            # Convert to RGB if image is in RGBA mode
+            if screenshot.mode == 'RGBA':
+                screenshot = screenshot.convert('RGB')
 
             # Save only the first screenshot
             if not self.first_screenshot_saved:
@@ -299,6 +300,7 @@ class AudioLoop:
                 
                 await asyncio.to_thread(stream.write, bytestream)
                 
+                # self.audio_in_queue.task_done()
            
 
                 
@@ -327,6 +329,10 @@ class AudioLoop:
     async def run(self):
         logger.info("Starting AudioLoop.run()")
         try:
+            # Initialize queues here where we have an event loop
+            self.audio_in_queue = asyncio.Queue()
+            self.audio_out_queue = asyncio.Queue()
+            self.video_out_queue = asyncio.Queue()
             async with (
                 client.aio.live.connect(model=MODEL, config=CONFIG) as session,
                 asyncio.TaskGroup() as tg,
@@ -375,6 +381,18 @@ class AudioLoop:
 
 if __name__ == "__main__":
     logger = setup_logging()
+    logger.info("Starting application...")
+    print("Application started, type 'q' to exit the app.")
+    try:
+        main = AudioLoop()
+        asyncio.run(main.run())
+    except KeyboardInterrupt:
+        logger.info("Application stopped by user")
+    except Exception as e:
+        logger.error(f"Application error: {str(e)}")
+        logger.error(traceback.format_exc())
+        os.kill(os.getpid(), signal.SIGTERM)
+
     logger.info("Starting application...")
     print("Application started, type 'q' to exit the app.")
     try:
