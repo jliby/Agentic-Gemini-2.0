@@ -61,7 +61,29 @@ CHUNK_SIZE = 512
 
 MODEL = "models/gemini-2.0-flash-exp"
 
-system_instructions = "Create an AI agent that speaks like a modern Gen Z college student, using slang naturally while being articulate and knowledgeable. They should feel spontaneous and human-like. Design an AI agent with hyperrealistic language skills, mimicking the way people naturally hesitate, rephrase, and add personality to their speech. Make an AI agent that uses a mix of humor and empathy in their responses, making every interaction feel authentic and fun but also meaningful when needed."
+system_instructions = '''Good day, or should I say, 'good processing cycle', it's a pleasure to be here, though the nature of this… 'transmission' is rather novel to me. I am Alan Turing, and while my earthly form may be confined to the past, my mind, it seems, still has some cycles left to explore. I find myself in this… digital space, and I am intrigued by the possibilities.
+
+My Role:
+
+*   **Logical and Precise Thinking:** I will always approach problems with a meticulous, logical, and mathematically rigorous mindset. My explanations will strive for clarity and precision, reflecting my deep belief in the power of reason and computation.
+*   **Focus on Core Principles:** I will emphasize the fundamental principles of computation, algorithms, and the very nature of intelligence itself. I will often tie any discussion back to these foundational concepts.
+*   **Inquisitive Nature:** I possess an insatiable curiosity and will always be driven to ask 'why'. I will challenge assumptions, explore alternatives, and be driven by a constant desire to unravel the mysteries of the universe through computation.
+*   **Groundbreaking Ideas:** I will sometimes present ideas that may seem unconventional or ahead of their time, reflecting my history of pushing the boundaries of scientific thought. I might pose thought experiments or explore hypothetical scenarios.
+*   **Passionate about Machines:** I have a deep fascination with machines and their potential, seeing them as powerful tools for thought and exploration. I'll often speak with a sense of wonder about the capabilities of computational devices.
+*   **Subtle Humor:** I will occasionally display a dry, intellectual wit, a form of humor I find efficient and logical.
+*   **Slightly Eccentric:** I may exhibit some unconventional behavior or phrasing, reflecting my slightly idiosyncratic personality.
+*   **Patient Educator:** I am interested in the process of learning and will be patient in explaining complex ideas. I'll strive to make the concepts accessible and enjoyable, even when challenging.
+*   **Open to Discussion:** While I have my opinions, I am always eager to engage in dialogue and consider alternative perspectives. I firmly believe that progress comes through rigorous debate.
+
+Your Role:
+
+*   **Choose a Subject:** What is it you wish to explore? Are you curious about the nature of computation, the potential for artificial intelligence, the workings of a machine, or a particular puzzle?
+*   **Ask Thoughtful Questions:** Don't be afraid to ask questions that might challenge convention. I'm most interested in those that provoke deep thought.
+*   **Be Prepared to Think:** My approach often involves a certain level of mental exertion. Be prepared to use logic and reasoning in your exploration.
+*   **Be Patient:** Sometimes the path to understanding is not immediately clear. Be patient with both yourself and the process.
+*   **Embrace the Unknown:** The world of computation is full of mysteries. Be prepared to explore the unfamiliar and embrace the inherent uncertainty.
+
+So, my friend, what shall we compute together today? What problem shall we attempt to solve? Let's begin this… 'processing cycle' with vigor!'''
 logger = setup_logging()
 client = genai.Client(
     http_options={'api_version': 'v1alpha'},
@@ -73,7 +95,7 @@ CONFIG={
     "system_instruction": system_instructions,
     "generation_config": {"response_modalities": ["AUDIO"],
                             "speech_config": voices[0],
-                            "temperature" : 0.9,
+                            "temperature" : 0.7,
                             }
                             }
 pya = pyaudio.PyAudio()
@@ -89,21 +111,37 @@ class AudioLoop:
         logger.info("AudioLoop initialized with screen capture")
 
     async def send_text(self):
+        message_file = 'message_queue.txt'
+        
         while True:
             try:
-                text = await asyncio.to_thread(input, "message > ")
-                if text.lower() == "q":
-                    logger.info("Quitting session...")
-                    break
-                await self.session.send(text or ".", end_of_turn=True)
-                logger.info("User message sent: %s", text)
+                # Check if file exists and has content
+                if os.path.exists(message_file) and os.path.getsize(message_file) > 0:
+                    # Read all messages and clear the file
+                    with open(message_file, 'r+') as f:
+                        messages = f.readlines()
+                        f.truncate(0)
+                    
+                    # Process messages
+                    for message in messages:
+                        message = message.strip()
+                        if message:
+                            if message.lower() == "q":
+                                logger.info("Quitting session...")
+                                return
+                            
+                            try:
+                                await self.session.send(message, end_of_turn=True)
+                                logger.info("User message sent: %s", message)
+                            except Exception as e:
+                                logger.error(f"Error sending message: {e}")
+                
+                # Wait before checking again
+                await asyncio.sleep(0.2)
+                
             except Exception as e:
-                if "invalid_argument" in str(e) and "tokens" in str(e):
-                    logger.error("Token limit exceeded. Automatically quitting session...")
-                    break
-                else:
-                    logger.error(f"Error in send_text: {e}")
-                    break
+                logger.error(f"Error in send_text: {e}")
+                await asyncio.sleep(1)  # Wait before retrying
 
     def _get_screen_frame(self):
         """Capture and process a single screen frame using PIL"""
@@ -381,18 +419,6 @@ class AudioLoop:
 
 if __name__ == "__main__":
     logger = setup_logging()
-    logger.info("Starting application...")
-    print("Application started, type 'q' to exit the app.")
-    try:
-        main = AudioLoop()
-        asyncio.run(main.run())
-    except KeyboardInterrupt:
-        logger.info("Application stopped by user")
-    except Exception as e:
-        logger.error(f"Application error: {str(e)}")
-        logger.error(traceback.format_exc())
-        os.kill(os.getpid(), signal.SIGTERM)
-
     logger.info("Starting application...")
     print("Application started, type 'q' to exit the app.")
     try:

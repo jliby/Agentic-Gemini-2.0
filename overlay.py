@@ -18,11 +18,14 @@ class Overlay(QMainWindow):
         self.setWindowFlags(
             Qt.WindowStaysOnTopHint | 
             Qt.FramelessWindowHint |
-            Qt.WindowMaximizeButtonHint  # Enable resizing
+            Qt.WindowMaximizeButtonHint |  # Enable resizing
+            Qt.Tool  # Makes it a utility window that stays on top
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)  # Specific for macOS to ensure window stays visible
         self.setGeometry(100, 100, 400, 500)
-
+        self.setWindowTitle("Gemini Live")  # Add window title
+        
         # Create main widget and layout
         main_widget = QWidget()
         main_layout = QVBoxLayout(main_widget)
@@ -46,6 +49,18 @@ class Overlay(QMainWindow):
         top_layout = QHBoxLayout(top_container)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(10)
+
+        # Add title label first (on the left)
+        title_label = QLabel("Gemini Live")
+        title_label.setStyleSheet("""
+            QLabel {
+                color: white;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 5px;
+            }
+        """)
+        top_layout.addWidget(title_label)
 
         # Add voice button
         current_voice = CONFIG["generation_config"]["speech_config"]
@@ -86,6 +101,24 @@ class Overlay(QMainWindow):
         """)
         minimize_button.clicked.connect(self.showMinimized)
         top_layout.addWidget(minimize_button)
+
+        # Add maximize button
+        maximize_button = QPushButton("□")
+        maximize_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: #8e8e8e;
+                padding: 5px;
+                font-size: 16px;
+                min-width: 30px;
+            }
+            QPushButton:hover {
+                color: #ffffff;
+            }
+        """)
+        maximize_button.clicked.connect(self.toggleMaximize)
+        top_layout.addWidget(maximize_button)
         
         # Add close button
         close_button = QPushButton("×")
@@ -147,7 +180,7 @@ class Overlay(QMainWindow):
         scroll_area.setWidget(self.chat_display)
         chat_layout.addWidget(scroll_area)
 
-        # Add input container at the bottom
+        # Create input container
         input_container = QWidget()
         input_container.setStyleSheet("""
             QWidget {
@@ -160,9 +193,9 @@ class Overlay(QMainWindow):
         input_layout.setContentsMargins(10, 10, 10, 10)
         input_layout.setSpacing(10)
 
-        # Add message input
-        self.message_input = QLineEdit()
-        self.message_input.setStyleSheet("""
+        # Create input field
+        self.input_field = QLineEdit()
+        self.input_field.setStyleSheet("""
             QLineEdit {
                 background-color: transparent;
                 border: none;
@@ -171,10 +204,30 @@ class Overlay(QMainWindow):
                 font-size: 14px;
             }
         """)
-        self.message_input.setPlaceholderText("Message Gemini...")
-        input_layout.addWidget(self.message_input)
+        self.input_field.setPlaceholderText("Message Gemini...")
+        self.input_field.returnPressed.connect(self.send_message)
+        input_layout.addWidget(self.input_field)
 
-        # Add send button
+        # Create clear input button
+        clear_input_button = QPushButton("×")  # Changed from "✕" to "×" for a cleaner look
+        clear_input_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: #8e8e8e;
+                padding: 2px;
+                font-size: 16px;
+                min-width: 16px;
+                margin-right: -5px;
+            }
+            QPushButton:hover {
+                color: white;
+            }
+        """)
+        clear_input_button.clicked.connect(self.input_field.clear)
+        input_layout.addWidget(clear_input_button)
+
+        # Create send button
         send_button = QPushButton("➤")
         send_button.setStyleSheet("""
             QPushButton {
@@ -189,6 +242,7 @@ class Overlay(QMainWindow):
                 color: white;
             }
         """)
+        send_button.clicked.connect(self.send_message)
         input_layout.addWidget(send_button)
 
         chat_layout.addWidget(input_container)
@@ -314,6 +368,33 @@ class Overlay(QMainWindow):
         super().resizeEvent(event)
         # Update the layout when resizing
         self.update()
+
+    def toggleMaximize(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+    def send_message(self):
+        message = self.input_field.text().strip()
+        if message:
+            try:
+                # Write message to queue file
+                with open('message_queue.txt', 'a', encoding='utf-8') as f:
+                    f.write(message + '\n')
+                    f.flush()  # Ensure message is written immediately
+                os.fsync(f.fileno())  # Force write to disk
+                
+                # Add message to chat display
+                self.add_message("You: " + message)
+                
+                # Clear input field
+                self.input_field.clear()
+            except Exception as e:
+                print(f"Error sending message: {e}")
+
+    def add_message(self, message):
+        self.chat_display.append(message)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
